@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="header">
+    <h1>Создать задачу</h1>
+    <div class="nav-buttons">
+        <a href="/tasks" class="nav-btn">Назад к задачам</a>
+        <button class="nav-btn" onclick="logout()">Выйти</button>
+    </div>
+</div>
+
+<div class="auth-form" style="max-width: 600px; margin: 0 auto;">
+    <h2>Новая задача</h2>
+    <form id="createTaskForm">
+        <div class="form-group">
+            <label for="title">Название задачи:</label>
+            <input type="text" id="title" name="title" required placeholder="Введите название задачи">
+        </div>
+        <div class="form-group">
+            <label for="description">Описание:</label>
+            <textarea id="description" name="description" rows="4" placeholder="Добавьте описание (необязательно)"></textarea>
+        </div>
+        <div class="form-group">
+            <label for="due_date">Срок выполнения:</label>
+            <input type="date" id="due_date" name="due_date" required>
+        </div>
+        <button type="submit" class="btn btn-full">Создать задачу</button>
+    </form>
+</div>
+
+<script>
+function getAuthHeader() {
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+        window.location.href = '/login';
+        return null;
+    }
+    return { 
+        'Authorization': `Bearer ${token}`, 
+        'Content-Type': 'application/json' 
+    };
+}
+
+document.getElementById('createTaskForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const headers = getAuthHeader();
+    if (!headers) return;
+    
+    const formData = {
+        title: document.getElementById('title').value,
+        description: document.getElementById('description').value,
+        due_date: document.getElementById('due_date').value
+    };
+    
+    const dueDate = new Date(formData.due_date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    if (dueDate < today) {
+        alert('Дата выполнения не может быть в прошлом!');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/tasks', {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(formData)
+        });
+        
+        if (response.ok) {
+            window.location.href = '/tasks';
+        } else {
+            const data = await response.json();
+            alert(data.error || 'Ошибка создания задачи');
+        }
+    } catch (error) {
+        alert('Ошибка сети');
+    }
+});
+
+function logout() {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    localStorage.removeItem('user_info');
+    window.location.href = '/login';
+}
+
+const today = new Date().toISOString().split('T')[0];
+document.getElementById('due_date').min = today;
+document.getElementById('due_date').value = today;     
+</script>
+{% endblock %}

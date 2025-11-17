@@ -1,0 +1,365 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="header">
+    <h1>Мои задачи</h1>
+    <div class="nav-buttons">
+        <a href="/create-task" class="nav-btn">Создать задачу</a>
+        <button class="nav-btn" onclick="logout()">Выйти</button>
+    </div>
+</div>
+
+<div class="user-info" id="userInfo">
+</div>
+
+<div class="sort-options">
+    <button class="sort-btn active" onclick="sortTasks('created_at')">По дате создания</button>
+    <button class="sort-btn" onclick="sortTasks('due_date')">По сроку выполнения</button>
+</div>
+
+<div class="tasks-container" id="tasksContainer">
+</div>
+
+<div id="editModal" class="modal">
+    <div class="modal-content">
+        <h2>Редактировать задачу</h2>
+        <form id="editTaskForm">
+            <input type="hidden" id="editTaskId">
+            <div class="form-group">
+                <label for="editTitle">Название задачи:</label>
+                <input type="text" id="editTitle" name="title" required>
+            </div>
+            <div class="form-group">
+                <label for="editDescription">Описание:</label>
+                <textarea id="editDescription" name="description" rows="4"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="editDueDate">Срок выполнения:</label>
+                <input type="date" id="editDueDate" name="due_date" required>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-cancel" onclick="closeEditModal()">Отмена</button>
+                <button type="submit" class="btn">Сохранить</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="notification" class="notification" style="display: none;"></div>
+
+<script>
+let currentSort = 'created_at';
+let currentEditTaskId = null;
+
+function getAuthHeader() {
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+        window.location.href = '/login';
+        return null;
+    }
+    return { 
+        'Authorization': `Bearer ${token}`, 
+        'Content-Type': 'application/json' 
+    };
+}
+
+function displayUserInfo() {
+    const userInfo = localStorage.getItem('user_info');
+    if (userInfo) {
+        const user = JSON.parse(userInfo);
+        document.getElementById('userInfo').innerHTML = `
+            <strong>👤 Пользователь:</strong> ${user.username} (${user.email})
+        `;
+    }
+}
+
+async function loadTasks() {
+    const headers = getAuthHeader();
+    if (!headers) return;
+    
+    try {
+        const response = await fetch(`/api/tasks?sort=${currentSort}`, {
+            headers: headers
+        });
+        
+        if (response.ok) {
+            const tasks = await response.json();
+            displayTasks(tasks);
+        } else if (response.status === 401) {
+            window.location.href = '/login';
+        } else {
+            console.error('Error loading tasks:', response.status);
+        }
+    } catch (error) {
+        console.error('Error loading tasks:', error);
+    }
+}
+
+function displayTasks(tasks) {
+    const container = document.getElementById('tasksContainer');
+    
+    if (tasks.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <h3>Пока нет задач!</h3>
+                <p>Создайте свою первую задачу, нажав на кнопку выше</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = '';
+    
+    tasks.forEach(task => {
+        const dueDate = new Date(task.due_date);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const isOverdue = dueDate < today && !task.completed;
+        const isToday = dueDate.toDateString() === today.toDateString();
+        
+        const formattedDate = formatDate(dueDate);
+        
+        const taskElement = document.createElement('div');
+        taskElement.className = `task-card ${task.completed ? 'completed' : ''} ${isOverdue ? 'overdue' : ''} ${isToday ? 'today' : ''}`;
+        taskElement.setAttribute('data-task-id', task.id);
+        taskElement.innerHTML = `
+            <div class="task-header">
+                <div class="task-title">${escapeHtml(task.title)}</div>
+                <div class="task-due ${isOverdue ? 'overdue-text' : ''} ${isToday ? 'today-text' : ''}">
+                    ${isOverdue ? '⚠️ ' : ''}${isToday ? '📌 ' : ''}📅 ${formattedDate}
+                    ${isOverdue ? ' (Просрочено!)' : ''}${isToday ? ' (Сегодня!)' : ''}
+                </div>
+            </div>
+            <div class="task-description">${escapeHtml(task.description || 'Нет описания')}</div>
+            <div class="task-actions">
+                <button class="action-btn btn-complete" onclick="toggleTask(${task.id}, ${!task.completed})">
+                    ${task.completed ? 'Вернуть' : 'Выполнить'}
+                </button>
+                <button class="action-btn btn-edit" onclick="openEditModal(${task.id})">✏️ Изменить</button>
+                <button class="action-btn btn-delete" onclick="deleteTask(${task.id})">🗑️ Удалить</button>
+            </div>
+        `;
+        container.appendChild(taskElement);
+    });
+}
+
+function formatDate(date) {
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    if (date.toDateString() === today.toDateString()) {
+        return 'Сегодня';
+    } else if (date.toDateString() === tomorrow.toDateString()) {
+        return 'Завтра';
+    } else if (date.toDateString() === yesterday.toDateString()) {
+        return 'Вчера';
+    } else {
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}.${month}.${year}`;
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function toggleTask(taskId, completed) {
+    const headers = getAuthHeader();
+    if (!headers) return;
+    
+    try {
+        const response = await fetch(`/api/tasks/${taskId}`, {
+            method: 'PUT',
+            headers: headers,
+            body: JSON.stringify({ completed })
+        });
+        
+        if (response.ok) {
+            loadTasks();
+            showNotification(completed ? 'Задача выполнена!' : 'Задача возвращена в работу');
+        }
+    } catch (error) {
+        console.error('Error updating task:', error);
+    }
+}
+
+function openEditModal(taskId) {
+    currentEditTaskId = taskId;
+    
+    const taskElement = document.querySelector(`[data-task-id="${taskId}"]`);
+    const title = taskElement.querySelector('.task-title').textContent;
+    const description = taskElement.querySelector('.task-description').textContent;
+    
+    const headers = getAuthHeader();
+    if (!headers) return;
+    
+    fetch(`/api/tasks?sort=created_at`, {
+        headers: headers
+    })
+    .then(response => response.json())
+    .then(tasks => {
+        const task = tasks.find(t => t.id === taskId);
+        if (task) {
+            document.getElementById('editTaskId').value = taskId;
+            document.getElementById('editTitle').value = title;
+            document.getElementById('editDescription').value = description === 'Нет описания' ? '' : description;
+            document.getElementById('editDueDate').value = task.due_date; 
+            
+            document.getElementById('editModal').style.display = 'block';
+        }
+    })
+    .catch(error => {
+        console.error('Error loading task data:', error);
+    });
+}
+
+function closeEditModal() {
+    document.getElementById('editModal').style.display = 'none';
+    currentEditTaskId = null;
+}
+
+document.getElementById('editTaskForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const headers = getAuthHeader();
+    if (!headers) return;
+    
+    const formData = {
+        title: document.getElementById('editTitle').value,
+        description: document.getElementById('editDescription').value,
+        due_date: document.getElementById('editDueDate').value
+    };
+    
+    try {
+        const response = await fetch(`/api/tasks/${currentEditTaskId}`, {
+            method: 'PUT',
+            headers: headers,
+            body: JSON.stringify(formData)
+        });
+        
+        if (response.ok) {
+            closeEditModal();
+            loadTasks();
+            showNotification('Задача успешно обновлена! ✨');
+        } else {
+            const data = await response.json();
+            alert(data.error || 'Ошибка обновления задачи');
+        }
+    } catch (error) {
+        console.error('Error updating task:', error);
+        alert('Ошибка сети');
+    }
+});
+
+async function deleteTask(taskId) {
+    if (confirm('Вы уверены, что хотите удалить эту задачу?')) {
+        const headers = getAuthHeader();
+        if (!headers) return;
+        
+        try {
+            const response = await fetch(`/api/tasks/${taskId}`, {
+                method: 'DELETE',
+                headers: headers
+            });
+            
+            if (response.ok) {
+                loadTasks();
+                showNotification('Задача удалена');
+            }
+        } catch (error) {
+            console.error('Error deleting task:', error);
+        }
+    }
+}
+
+function sortTasks(sortBy) {
+    currentSort = sortBy;
+    document.querySelectorAll('.sort-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+    loadTasks();
+}
+
+function logout() {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    localStorage.removeItem('user_info');
+    window.location.href = '/login';
+}
+
+async function checkNotifications() {
+    const headers = getAuthHeader();
+    if (!headers) return;
+    
+    try {
+        const response = await fetch('/api/upcoming-tasks', {
+            headers: headers
+        });
+        
+        if (response.ok) {
+            const tasks = await response.json();
+            tasks.forEach(task => {
+                showNotification(`Напоминание: "${task.title}" на завтра!`);
+            });
+        }
+    } catch (error) {
+        console.error('Error checking notifications:', error);
+    }
+}
+
+function showNotification(message) {
+    const notification = document.getElementById('notification');
+    notification.textContent = message;
+    notification.style.display = 'block';
+    
+    setTimeout(() => {
+        notification.style.display = 'none';
+    }, 5000);
+}
+
+window.addEventListener('click', function(event) {
+    const modal = document.getElementById('editModal');
+    if (event.target === modal) {
+        closeEditModal();
+    }
+});
+
+window.addEventListener('load', function() {
+    displayUserInfo();
+    loadTasks();
+});
+
+setInterval(checkNotifications, 60000);
+setTimeout(checkNotifications, 5000);
+</script>
+
+<style>
+.overdue-text {
+    color: var(--error) !important;
+    font-weight: bold;
+}
+
+.today-text {
+    color: var(--warning) !important;
+    font-weight: bold;
+}
+
+.task-card.overdue {
+    border-left-color: var(--error);
+    background: linear-gradient(135deg, rgba(245, 101, 101, 0.1), rgba(26, 16, 56, 0.9));
+}
+
+.task-card.today {
+    border-left-color: var(--warning);
+    background: linear-gradient(135deg, rgba(237, 137, 54, 0.1), rgba(26, 16, 56, 0.9));
+}
+</style>
+{% endblock %}

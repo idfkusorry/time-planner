@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-form">
+        <h2>Регистрация в планировщике задач</h2>
+        <form id="registerForm">
+            <div class="form-group">
+                <label for="email">Email:</label>
+                <input type="email" id="email" name="email" required>
+            </div>
+            <div class="form-group">
+                <label for="username">Имя пользователя:</label>
+                <input type="text" id="username" name="username" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Пароль:</label>
+                <input type="password" id="password" name="password" required minlength="6">
+            </div>
+            <button type="submit" class="btn btn-full">Зарегистрироваться</button>
+        </form>
+        <div class="auth-link">
+            <p>Уже есть аккаунт? <a href="/login">Войти</a></p>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('registerForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const formData = {
+        email: document.getElementById('email').value,
+        username: document.getElementById('username').value,
+        password: document.getElementById('password').value
+    };
+    
+    try {
+        const response = await fetch('/api/register', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(formData)
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            localStorage.setItem('access_token', data.access_token);
+            localStorage.setItem('user_info', JSON.stringify({
+                username: data.username,
+                email: data.email
+            }));
+            window.location.href = '/tasks';
+        } else {
+            alert(data.error || 'Ошибка регистрации');
+        }
+    } catch (error) {
+        console.error('Registration error:', error);
+        alert('Ошибка сети');
+    }
+});
+</script>
+{% endblock %}
